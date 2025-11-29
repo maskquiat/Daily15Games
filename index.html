@@ -141,12 +141,13 @@
       'T4': [[1, 1, 1], [0, 1, 0]],
       'Z4': [[1, 1, 0], [0, 1, 1]],
       'L4': [[1, 0, 0], [1, 1, 1]],
-      'I4': [[1, 1, 1, 1]]
+      'I4': [[1, 1, 1, 1]],
+      'I5': [[1, 1, 1, 1, 1]] // Added 5-cell piece to make total 34 cells
     };
 
     const COLORS = [
       '#5D6D7E', '#A569BD', '#E74C3C', '#3498DB', '#1ABC9C', 
-      '#F39C12', '#D35400', '#2E86C1', '#27AE60'
+      '#F39C12', '#D35400', '#2E86C1', '#27AE60', '#16A085'
     ];
 
     // ========== APP STATE ==========
@@ -164,6 +165,11 @@
       endTime: null,
     };
 
+    // Quick Blitz Timer State
+    let blitzTimerInterval = null;
+    let blitzTimeRemaining = 60;
+    let blitzTimerStarted = false;
+
     // Block Logic State
     let blockState = {
       grid: [],
@@ -176,7 +182,42 @@
     };
 
     // ========== FIFTEEN PUZZLE LOGIC ==========
+    function startBlitzTimer() {
+      if (blitzTimerInterval) return; // Already running
+      
+      blitzTimerStarted = true;
+      blitzTimerInterval = setInterval(() => {
+        blitzTimeRemaining--;
+        render();
+        
+        if (blitzTimeRemaining <= 0) {
+          stopBlitzTimer();
+          // Time's up!
+          alert("Time's up! Try again.");
+          initFifteenPuzzle('BLITZ');
+        }
+      }, 1000);
+    }
+
+    function stopBlitzTimer() {
+      if (blitzTimerInterval) {
+        clearInterval(blitzTimerInterval);
+        blitzTimerInterval = null;
+      }
+    }
+
+    function resetBlitzTimer() {
+      stopBlitzTimer();
+      blitzTimeRemaining = 60;
+      blitzTimerStarted = false;
+    }
+
     function initFifteenPuzzle(mode) {
+      // Reset blitz timer if switching to blitz mode
+      if (mode === 'BLITZ') {
+        resetBlitzTimer();
+      }
+
       const seed = mode === 'DAILY' ? getDailySeed() : Date.now();
       const gridSize = mode === 'DAILY' ? 4 : 3;
       const targetSize = gridSize * gridSize;
@@ -250,6 +291,11 @@
       const isAdjacent = Math.abs(row - emptyRow) + Math.abs(col - emptyCol) === 1;
 
       if (isAdjacent) {
+        // Start blitz timer on first move
+        if (mode === 'BLITZ' && fifteenState.moves === 0 && !blitzTimerStarted) {
+          startBlitzTimer();
+        }
+
         const newGrid = [...grid];
         newGrid[emptyIndex] = newGrid[index];
         newGrid[index] = null;
@@ -272,6 +318,11 @@
           localStorage.setItem(`daily15_${seed}`, JSON.stringify(fifteenState));
         }
 
+        // Stop blitz timer on completion
+        if (isSolved && mode === 'BLITZ') {
+          stopBlitzTimer();
+        }
+
         render();
         if (isSolved) {
           showWinModal = true;
@@ -290,7 +341,7 @@
       );
 
       const blockers = [];
-      while (blockers.length < 6) {
+      while (blockers.length < 2) {
         const r = Math.floor(rng.next() * 6);
         const c = Math.floor(rng.next() * 6);
         const key = `${r},${c}`;
@@ -554,6 +605,16 @@
       
       return `
         <div class="flex flex-col items-center max-w-xl mx-auto w-full">
+          ${mode === 'BLITZ' ? `
+            <div class="w-full mb-6 bg-gradient-to-r from-accent to-accent-hover rounded-lg p-4 text-center">
+              <div class="text-white/80 text-sm uppercase tracking-widest mb-1">Time Remaining</div>
+              <div class="text-white text-5xl font-bold font-serif tabular-nums ${blitzTimeRemaining <= 10 ? 'animate-pulse text-highlight' : ''}">
+                ${blitzTimeRemaining}s
+              </div>
+              ${!blitzTimerStarted ? '<div class="text-white/70 text-xs mt-2">Make your first move to start!</div>' : ''}
+            </div>
+          ` : ''}
+          
           <div class="w-full flex justify-between items-end mb-6 border-b border-border-subtle pb-4">
             <div>
               <h2 class="font-serif text-3xl text-ink font-bold">
@@ -721,7 +782,7 @@
                   </p>
                   <ul class="list-disc pl-5 text-sm space-y-1 mb-4 text-ink-light">
                     <li><strong>The Fifteen:</strong> A 4x4 grid. Solvability requires foresight and efficiency.</li>
-                    <li><strong>Quick Blitz:</strong> A 3x3 grid designed for speed.</li>
+                    <li><strong>Quick Blitz:</strong> A 3x3 grid. Beat the 60-second countdown!</li>
                   </ul>
                   
                   <div class="bg-paper p-4 rounded-sm border border-border-subtle">
@@ -789,21 +850,32 @@
       const timeElapsed = (fifteenState.endTime && fifteenState.startTime) 
         ? fifteenState.endTime - fifteenState.startTime 
         : 0;
+      
+      // For Quick Blitz, calculate time used
+      const blitzTimeUsed = mode === 'BLITZ' ? 60 - blitzTimeRemaining : 0;
 
       return `
         <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
           <div class="bg-paper w-full max-w-md rounded-sm shadow-elevated border border-border-subtle">
             <div class="p-6 border-b border-border-subtle flex justify-between items-center bg-white">
-              <h2 class="font-serif text-2xl font-bold text-ink">${mode === 'DAILY' ? 'Puzzle Solved' : 'Blitz Complete'}</h2>
+              <h2 class="font-serif text-2xl font-bold text-ink">${mode === 'DAILY' ? 'Puzzle Solved' : 'Blitz Complete!'}</h2>
               <button id="closeWin" class="text-ink-light hover:text-ink transition-colors text-2xl leading-none">&times;</button>
             </div>
             <div class="p-6">
               <div class="text-center">
-                <div class="mb-6">
-                  <p class="font-sans text-sm text-ink-light uppercase tracking-widest mb-2">Performance</p>
-                  <div class="font-serif text-4xl font-bold text-accent mb-1">${ranking.title}</div>
-                  <p class="font-sans text-ink-light italic">${ranking.description}</p>
-                </div>
+                ${mode === 'DAILY' ? `
+                  <div class="mb-6">
+                    <p class="font-sans text-sm text-ink-light uppercase tracking-widest mb-2">Performance</p>
+                    <div class="font-serif text-4xl font-bold text-accent mb-1">${ranking.title}</div>
+                    <p class="font-sans text-ink-light italic">${ranking.description}</p>
+                  </div>
+                ` : `
+                  <div class="mb-6">
+                    <p class="font-sans text-sm text-ink-light uppercase tracking-widest mb-2">Challenge Complete</p>
+                    <div class="font-serif text-4xl font-bold text-success mb-1">${blitzTimeUsed}s</div>
+                    <p class="font-sans text-ink-light italic">Completed in ${blitzTimeUsed} seconds</p>
+                  </div>
+                `}
 
                 <div class="grid grid-cols-2 gap-4 border-t border-b border-border-subtle py-4 mb-6">
                   <div>
@@ -812,7 +884,7 @@
                   </div>
                   <div>
                     <div class="text-xs uppercase text-ink-light tracking-wider">Time</div>
-                    <div class="text-xl font-bold text-ink">${formatTime(timeElapsed)}</div>
+                    <div class="text-xl font-bold text-ink">${mode === 'BLITZ' ? blitzTimeUsed + 's' : formatTime(timeElapsed)}</div>
                   </div>
                 </div>
 
@@ -820,7 +892,7 @@
                   id="closeWinBtn"
                   class="w-full bg-accent hover:bg-accent-hover text-white font-sans font-medium py-3 px-4 rounded-sm transition-colors"
                 >
-                  Review Board
+                  ${mode === 'BLITZ' ? 'Play Again' : 'Review Board'}
                 </button>
               </div>
             </div>
@@ -904,7 +976,15 @@
       if (closeWin) closeWin.onclick = () => { showWinModal = false; render(); };
 
       const closeWinBtn = document.getElementById('closeWinBtn');
-      if (closeWinBtn) closeWinBtn.onclick = () => { showWinModal = false; render(); };
+      if (closeWinBtn) closeWinBtn.onclick = () => { 
+        showWinModal = false; 
+        // If Quick Blitz, restart the game
+        if (currentMode === 'QUICK_BLITZ') {
+          initFifteenPuzzle('BLITZ');
+        } else {
+          render();
+        }
+      };
 
       // Footer
       const privacyBtn = document.getElementById('privacyBtn');
