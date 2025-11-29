@@ -141,13 +141,12 @@
       'T4': [[1, 1, 1], [0, 1, 0]],
       'Z4': [[1, 1, 0], [0, 1, 1]],
       'L4': [[1, 0, 0], [1, 1, 1]],
-      'I4': [[1, 1, 1, 1]],
-      'I5': [[1, 1, 1, 1, 1]] // Added 5-cell piece to make total 34 cells
+      'I4': [[1, 1, 1, 1]]
     };
 
     const COLORS = [
       '#5D6D7E', '#A569BD', '#E74C3C', '#3498DB', '#1ABC9C', 
-      '#F39C12', '#D35400', '#2E86C1', '#27AE60', '#16A085'
+      '#F39C12', '#D35400', '#2E86C1', '#27AE60'
     ];
 
     // ========== APP STATE ==========
@@ -341,7 +340,7 @@
       );
 
       const blockers = [];
-      while (blockers.length < 2) {
+      while (blockers.length < 7) {
         const r = Math.floor(rng.next() * 6);
         const c = Math.floor(rng.next() * 6);
         const key = `${r},${c}`;
