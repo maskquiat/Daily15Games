@@ -12,13 +12,12 @@
 </script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Cognitive Daily</title>
+  <title>Daily15.xyz - Daily Puzzle Games</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=Source+Sans+3:wght@300;400;500;600&display=swap" rel="stylesheet">
   <style>
-    /* Custom Scrollbar for a cleaner look */
     ::-webkit-scrollbar {
       width: 8px;
     }
@@ -33,8 +32,17 @@
       background: #a8a8a8; 
     }
     body {
-      background-color: #F9F8F4; /* Off-white, paper-like background */
+      background-color: #F9F8F4;
       color: #121212;
+    }
+    .pattern-diagonal-stripes {
+      background-image: repeating-linear-gradient(
+        45deg,
+        transparent,
+        transparent 10px,
+        rgba(255, 255, 255, 0.1) 10px,
+        rgba(255, 255, 255, 0.1) 20px
+      );
     }
   </style>
   <script>
@@ -50,10 +58,10 @@
             'ink': '#121212',
             'ink-light': '#4A4A4A',
             'border-subtle': '#E5E5E5',
-            'accent': '#2C3E50', // Sophisticated Slate Blue
+            'accent': '#2C3E50',
             'accent-hover': '#1A252F',
-            'highlight': '#C0392B', // Muted Red for alerts/important
-            'success': '#27AE60', // Muted Green
+            'highlight': '#C0392B',
+            'success': '#27AE60',
             'tile': '#FFFFFF',
             'tile-dark': '#F0F0F0',
           },
@@ -65,19 +73,849 @@
       }
     }
   </script>
-<script type="importmap">
-{
-  "imports": {
-    "react": "https://aistudiocdn.com/react@^19.2.0",
-    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
-    "react/": "https://aistudiocdn.com/react@^19.2.0/"
-  }
-}
-</script>
-<link rel="stylesheet" href="/index.css">
 </head>
 <body>
   <div id="root"></div>
-<script type="module" src="/index.tsx"></script>
+
+  <script>
+    // ========== GAME LOGIC & UTILITIES ==========
+    class SeededRandom {
+      constructor(seed) {
+        this.seed = seed % 2147483647;
+        if (this.seed <= 0) this.seed += 2147483646;
+      }
+
+      next() {
+        this.seed = (this.seed * 16807) % 2147483647;
+        return (this.seed - 1) / 2147483646;
+      }
+    }
+
+    const getDailySeed = () => {
+      const today = new Date();
+      return today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate();
+    };
+
+    const getPuzzleNumber = () => {
+      const start = new Date('2025-09-19T00:00:00');
+      const now = new Date();
+      const diffTime = Math.abs(now.getTime() - start.getTime());
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+      return diffDays;
+    };
+
+    const getBlockPuzzleNumber = () => {
+      const start = new Date('2025-11-28T00:00:00');
+      const now = new Date();
+      const diffTime = Math.abs(now.getTime() - start.getTime());
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+      return diffDays;
+    };
+
+    const DAILY_15_RANKINGS = [
+      { title: "Grandmaster", maxMoves: 60, description: "A flawless display of logic." },
+      { title: "Strategist", maxMoves: 90, description: "Highly efficient problem solving." },
+      { title: "Tactician", maxMoves: 130, description: "A strong, calculated approach." },
+      { title: "Apprentice", maxMoves: 180, description: "A solid effort with room to optimize." },
+      { title: "Novice", maxMoves: Infinity, description: "Persistence is the path to mastery." },
+    ];
+
+    const getRanking = (moves) => {
+      return DAILY_15_RANKINGS.find(r => moves <= r.maxMoves) || DAILY_15_RANKINGS[DAILY_15_RANKINGS.length - 1];
+    };
+
+    const formatTime = (ms) => {
+      const totalSeconds = Math.floor(ms / 1000);
+      const minutes = Math.floor(totalSeconds / 60);
+      const seconds = totalSeconds % 60;
+      return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+    };
+
+    // Block Logic Shapes
+    const SHAPES = {
+      'I1': [[1]],
+      'I2': [[1, 1]],
+      'I3': [[1, 1, 1]],
+      'L3': [[1, 0], [1, 1]],
+      'O4': [[1, 1], [1, 1]],
+      'T4': [[1, 1, 1], [0, 1, 0]],
+      'Z4': [[1, 1, 0], [0, 1, 1]],
+      'L4': [[1, 0, 0], [1, 1, 1]],
+      'I4': [[1, 1, 1, 1]]
+    };
+
+    const COLORS = [
+      '#5D6D7E', '#A569BD', '#E74C3C', '#3498DB', '#1ABC9C', 
+      '#F39C12', '#D35400', '#2E86C1', '#27AE60'
+    ];
+
+    // ========== APP STATE ==========
+    let currentMode = 'DAILY_15'; // DAILY_15, QUICK_BLITZ, BLOCK_LOGIC
+    let showInfoModal = false;
+    let showWinModal = false;
+
+    // Fifteen Puzzle State
+    let fifteenState = {
+      grid: [],
+      emptyIndex: 15,
+      moves: 0,
+      isComplete: false,
+      startTime: null,
+      endTime: null,
+    };
+
+    // Block Logic State
+    let blockState = {
+      grid: [],
+      pieces: [],
+      selectedPieceId: null,
+      isComplete: false,
+      moves: 0,
+      startTime: null,
+      endTime: null
+    };
+
+    // ========== FIFTEEN PUZZLE LOGIC ==========
+    function initFifteenPuzzle(mode) {
+      const seed = mode === 'DAILY' ? getDailySeed() : Date.now();
+      const gridSize = mode === 'DAILY' ? 4 : 3;
+      const targetSize = gridSize * gridSize;
+      const storageKey = mode === 'DAILY' ? `daily15_${seed}` : null;
+      
+      // Try loading from storage
+      if (storageKey) {
+        const saved = localStorage.getItem(storageKey);
+        if (saved) {
+          fifteenState = JSON.parse(saved);
+          render();
+          return;
+        }
+      }
+
+      const rng = new SeededRandom(seed);
+      const newGrid = Array.from({ length: targetSize - 1 }, (_, i) => i + 1);
+      newGrid.push(null);
+      
+      let currentGrid = [...newGrid];
+      let emptyIdx = targetSize - 1;
+      const shuffleMoves = mode === 'DAILY' ? 250 : 50;
+      let lastMoveIndex = -1;
+
+      for (let i = 0; i < shuffleMoves; i++) {
+        const validMoves = [];
+        const row = Math.floor(emptyIdx / gridSize);
+        const col = emptyIdx % gridSize;
+
+        if (row > 0) validMoves.push(emptyIdx - gridSize);
+        if (row < gridSize - 1) validMoves.push(emptyIdx + gridSize);
+        if (col > 0) validMoves.push(emptyIdx - 1);
+        if (col < gridSize - 1) validMoves.push(emptyIdx + 1);
+
+        const filteredMoves = validMoves.filter(m => m !== lastMoveIndex);
+        const move = filteredMoves.length > 0 
+          ? filteredMoves[Math.floor(rng.next() * filteredMoves.length)]
+          : validMoves[0];
+
+        currentGrid[emptyIdx] = currentGrid[move];
+        currentGrid[move] = null;
+        lastMoveIndex = emptyIdx;
+        emptyIdx = move;
+      }
+
+      fifteenState = {
+        grid: currentGrid,
+        emptyIndex: emptyIdx,
+        moves: 0,
+        isComplete: false,
+        startTime: null,
+        endTime: null,
+      };
+
+      render();
+    }
+
+    function handleFifteenTileClick(index) {
+      if (fifteenState.isComplete) return;
+
+      const mode = currentMode === 'DAILY_15' ? 'DAILY' : 'BLITZ';
+      const gridSize = mode === 'DAILY' ? 4 : 3;
+      const targetSize = gridSize * gridSize;
+
+      const { emptyIndex, grid } = fifteenState;
+      const row = Math.floor(index / gridSize);
+      const col = index % gridSize;
+      const emptyRow = Math.floor(emptyIndex / gridSize);
+      const emptyCol = emptyIndex % gridSize;
+
+      const isAdjacent = Math.abs(row - emptyRow) + Math.abs(col - emptyCol) === 1;
+
+      if (isAdjacent) {
+        const newGrid = [...grid];
+        newGrid[emptyIndex] = newGrid[index];
+        newGrid[index] = null;
+
+        const isSolved = newGrid.slice(0, targetSize - 1).every((val, i) => val === i + 1);
+        
+        fifteenState = {
+          ...fifteenState,
+          grid: newGrid,
+          emptyIndex: index,
+          moves: fifteenState.moves + 1,
+          startTime: fifteenState.startTime || Date.now(),
+          isComplete: isSolved,
+          endTime: isSolved ? Date.now() : null,
+        };
+
+        // Save to localStorage for daily mode
+        if (mode === 'DAILY') {
+          const seed = getDailySeed();
+          localStorage.setItem(`daily15_${seed}`, JSON.stringify(fifteenState));
+        }
+
+        render();
+        if (isSolved) {
+          showWinModal = true;
+          render();
+        }
+      }
+    }
+
+    // ========== BLOCK LOGIC ==========
+    function initBlockLogic() {
+      const seed = getDailySeed();
+      const rng = new SeededRandom(seed);
+      
+      const initialGrid = Array(6).fill(null).map(() => 
+        Array(6).fill(null).map(() => ({ value: null, isBlocker: false }))
+      );
+
+      const blockers = [];
+      while (blockers.length < 6) {
+        const r = Math.floor(rng.next() * 6);
+        const c = Math.floor(rng.next() * 6);
+        const key = `${r},${c}`;
+        if (!blockers.includes(key)) {
+          blockers.push(key);
+          initialGrid[r][c] = { value: 'blocker', isBlocker: true };
+        }
+      }
+
+      const pieces = Object.entries(SHAPES).map(([key, shape], idx) => ({
+        id: key,
+        shape: shape,
+        color: COLORS[idx],
+        rotation: 0,
+        placed: false
+      }));
+
+      blockState = {
+        grid: initialGrid,
+        pieces,
+        selectedPieceId: null,
+        isComplete: false,
+        moves: 0,
+        startTime: null,
+        endTime: null
+      };
+
+      render();
+    }
+
+    function rotateShape(shape) {
+      const rows = shape.length;
+      const cols = shape[0].length;
+      const rotated = Array(cols).fill(0).map(() => Array(rows).fill(0));
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          rotated[c][rows - 1 - r] = shape[r][c];
+        }
+      }
+      return rotated;
+    }
+
+    function handleBlockPieceSelect(id) {
+      if (blockState.isComplete) return;
+      
+      if (blockState.selectedPieceId === id) {
+        const newPieces = blockState.pieces.map(p => {
+          if (p.id === id) {
+            return { ...p, shape: rotateShape(p.shape), rotation: (p.rotation + 1) % 4 };
+          }
+          return p;
+        });
+        blockState = { ...blockState, pieces: newPieces };
+      } else {
+        const piece = blockState.pieces.find(p => p.id === id);
+        if (!piece?.placed) {
+          blockState = { ...blockState, selectedPieceId: id };
+        }
+      }
+      render();
+    }
+
+    function handleBlockGridClick(row, col) {
+      if (blockState.isComplete) return;
+
+      const clickedCell = blockState.grid[row][col];
+
+      // Remove existing piece
+      if (clickedCell.value && !clickedCell.isBlocker) {
+        const pieceId = clickedCell.value;
+        
+        const newGrid = blockState.grid.map(r => r.map(c => 
+          c.value === pieceId ? { ...c, value: null } : c
+        ));
+        
+        const newPieces = blockState.pieces.map(p => 
+          p.id === pieceId ? { ...p, placed: false } : p
+        );
+
+        blockState = {
+          ...blockState,
+          grid: newGrid,
+          pieces: newPieces,
+          moves: blockState.moves + 1,
+          selectedPieceId: null 
+        };
+        render();
+        return;
+      }
+
+      // Place new piece
+      if (!blockState.selectedPieceId) return;
+
+      const piece = blockState.pieces.find(p => p.id === blockState.selectedPieceId);
+      if (!piece || piece.placed) return; 
+
+      const shape = piece.shape;
+      const sRows = shape.length;
+      const sCols = shape[0].length;
+
+      let anchorR = 0;
+      let anchorC = 0;
+      let found = false;
+      
+      for(let r=0; r<sRows; r++) {
+        for(let c=0; c<sCols; c++) {
+          if (shape[r][c] === 1) {
+            anchorR = r;
+            anchorC = c;
+            found = true;
+            break;
+          }
+        }
+        if(found) break;
+      }
+
+      const startR = row - anchorR;
+      const startC = col - anchorC;
+      
+      let canPlace = true;
+      const cellsToFill = [];
+
+      for (let r = 0; r < sRows; r++) {
+        for (let c = 0; c < sCols; c++) {
+          if (shape[r][c] === 1) {
+            const gridR = startR + r;
+            const gridC = startC + c;
+
+            if (
+              gridR < 0 || gridR >= 6 || 
+              gridC < 0 || gridC >= 6 || 
+              blockState.grid[gridR][gridC].value !== null
+            ) {
+              canPlace = false;
+            } else {
+              cellsToFill.push({r: gridR, c: gridC});
+            }
+          }
+        }
+      }
+
+      if (canPlace) {
+        const newGrid = blockState.grid.map(r => r.map(c => ({...c})));
+        cellsToFill.forEach(({r, c}) => {
+          newGrid[r][c].value = piece.id;
+        });
+
+        const newPieces = blockState.pieces.map(p => 
+          p.id === piece.id ? { ...p, placed: true } : p
+        );
+
+        const isFull = newGrid.every(r => r.every(c => c.value !== null));
+
+        blockState = {
+          ...blockState,
+          grid: newGrid,
+          pieces: newPieces,
+          selectedPieceId: null,
+          moves: blockState.moves + 1,
+          isComplete: isFull,
+          startTime: blockState.startTime || Date.now(),
+          endTime: isFull ? Date.now() : null
+        };
+
+        render();
+        if (isFull) {
+          showWinModal = true;
+          render();
+        }
+      }
+    }
+
+    // ========== RENDERING ==========
+    function render() {
+      const root = document.getElementById('root');
+      root.innerHTML = `
+        ${renderHeader()}
+        ${renderMain()}
+        ${renderInfoModal()}
+        ${renderWinModal()}
+        ${renderFooter()}
+      `;
+      attachEventListeners();
+    }
+
+    function renderHeader() {
+      const dateStr = new Date().toLocaleDateString('en-US', {
+        weekday: 'long',
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric'
+      });
+
+      return `
+        <header class="w-full flex flex-col items-center pt-8 pb-6 px-4 border-b border-border-subtle bg-paper relative">
+          <div class="absolute right-4 top-8 md:right-8">
+            <button 
+              id="infoBtn"
+              class="w-8 h-8 flex items-center justify-center rounded-full border border-ink-light/30 text-ink hover:bg-ink hover:text-white transition-colors"
+            >
+              <span class="font-serif italic font-bold text-sm">i</span>
+            </button>
+          </div>
+
+          <div class="mb-2 font-sans text-xs font-bold tracking-widest uppercase text-ink-light">
+            ${dateStr}
+          </div>
+          <h1 class="font-serif text-4xl md:text-5xl font-bold text-ink mb-8 tracking-tight">
+            Daily15.xyz
+          </h1>
+          
+          <nav class="flex space-x-8 md:space-x-12">
+            <button
+              id="navDaily"
+              class="pb-2 text-sm md:text-base font-sans font-semibold tracking-wide uppercase transition-all duration-300 ${
+                currentMode === 'DAILY_15' 
+                  ? 'text-ink border-b-2 border-ink' 
+                  : 'text-ink-light border-b-2 border-transparent hover:text-accent hover:border-accent/30'
+              }"
+            >
+              The Fifteen
+            </button>
+            <button
+              id="navBlitz"
+              class="pb-2 text-sm md:text-base font-sans font-semibold tracking-wide uppercase transition-all duration-300 ${
+                currentMode === 'QUICK_BLITZ' 
+                  ? 'text-ink border-b-2 border-ink' 
+                  : 'text-ink-light border-b-2 border-transparent hover:text-accent hover:border-accent/30'
+              }"
+            >
+              Quick Blitz
+            </button>
+            <button
+              id="navBlock"
+              class="pb-2 text-sm md:text-base font-sans font-semibold tracking-wide uppercase transition-all duration-300 ${
+                currentMode === 'BLOCK_LOGIC' 
+                  ? 'text-ink border-b-2 border-ink' 
+                  : 'text-ink-light border-b-2 border-transparent hover:text-accent hover:border-accent/30'
+              }"
+            >
+              Block Logic
+            </button>
+          </nav>
+        </header>
+      `;
+    }
+
+    function renderMain() {
+      return `
+        <main class="w-full max-w-4xl px-4 py-8 md:py-12 flex-grow flex flex-col items-center mx-auto">
+          ${currentMode === 'DAILY_15' ? renderFifteenPuzzle('DAILY') : ''}
+          ${currentMode === 'QUICK_BLITZ' ? renderFifteenPuzzle('BLITZ') : ''}
+          ${currentMode === 'BLOCK_LOGIC' ? renderBlockLogic() : ''}
+        </main>
+      `;
+    }
+
+    function renderFifteenPuzzle(mode) {
+      const gridSize = mode === 'DAILY' ? 4 : 3;
+      const puzzleNum = getPuzzleNumber();
+      
+      return `
+        <div class="flex flex-col items-center max-w-xl mx-auto w-full">
+          <div class="w-full flex justify-between items-end mb-6 border-b border-border-subtle pb-4">
+            <div>
+              <h2 class="font-serif text-3xl text-ink font-bold">
+                ${mode === 'DAILY' ? 'The Fifteen' : 'Quick Blitz'}
+              </h2>
+              ${mode === 'DAILY' ? `
+                <p class="font-sans text-sm text-ink-light tracking-wide uppercase mt-1">
+                  No. ${puzzleNum}
+                </p>
+              ` : ''}
+            </div>
+            <div class="text-right font-sans">
+              <div class="text-sm text-ink-light uppercase tracking-wider">Moves</div>
+              <div class="text-2xl font-light text-ink tabular-nums">${fifteenState.moves}</div>
+            </div>
+          </div>
+
+          <div 
+            class="grid gap-2 bg-[#EAE8E3] p-3 rounded-sm shadow-inner"
+            style="grid-template-columns: repeat(${gridSize}, 1fr); width: 100%; aspect-ratio: 1/1; max-width: 450px;"
+          >
+            ${fifteenState.grid.map((val, idx) => {
+              const isEmpty = val === null;
+              const row = Math.floor(idx / gridSize);
+              const col = idx % gridSize;
+              const emptyRow = Math.floor(fifteenState.emptyIndex / gridSize);
+              const emptyCol = fifteenState.emptyIndex % gridSize;
+              const isMoveable = !fifteenState.isComplete && !isEmpty && (Math.abs(row - emptyRow) + Math.abs(col - emptyCol) === 1);
+
+              return `
+                <button
+                  data-tile-index="${idx}"
+                  class="relative flex items-center justify-center text-2xl md:text-3xl font-serif font-bold transition-all duration-200 ${
+                    isEmpty ? 'invisible' : 'visible'
+                  } ${
+                    fifteenState.isComplete 
+                      ? 'bg-success text-white shadow-none' 
+                      : 'bg-tile text-ink shadow-soft hover:shadow-md'
+                  } ${
+                    isMoveable && !fifteenState.isComplete ? 'cursor-pointer hover:-translate-y-[2px] hover:bg-white' : 'cursor-default'
+                  } rounded-sm border border-black/5"
+                  style="aspect-ratio: 1/1;"
+                  ${isEmpty || fifteenState.isComplete ? 'disabled' : ''}
+                >
+                  ${val || ''}
+                </button>
+              `;
+            }).join('')}
+          </div>
+          
+          ${mode === 'BLITZ' ? `
+            <button 
+              id="resetBlitz"
+              class="mt-8 text-sm font-sans font-semibold uppercase tracking-widest text-ink-light hover:text-accent transition-colors"
+            >
+              Reset Puzzle
+            </button>
+          ` : ''}
+        </div>
+      `;
+    }
+
+    function renderBlockLogic() {
+      const puzzleNum = getBlockPuzzleNumber();
+
+      return `
+        <div class="flex flex-col items-center max-w-2xl mx-auto w-full">
+          <div class="w-full flex justify-between items-end mb-6 border-b border-border-subtle pb-4">
+            <div>
+              <h2 class="font-serif text-3xl text-ink font-bold">Block Logic</h2>
+              <p class="font-sans text-sm text-ink-light tracking-wide uppercase mt-1">
+                No. ${puzzleNum}
+              </p>
+            </div>
+            <div class="text-right font-sans">
+              <button 
+                id="resetBlock"
+                class="text-sm uppercase tracking-widest text-ink-light hover:text-accent transition-colors"
+              >
+                Reset
+              </button>
+            </div>
+          </div>
+
+          <div class="flex flex-col md:flex-row gap-8 w-full">
+            <div class="flex-1 flex justify-center">
+              <div 
+                class="grid grid-cols-6 gap-1 bg-ink-light p-2 rounded-sm"
+                style="width: min(100%, 350px); aspect-ratio: 1/1;"
+              >
+                ${blockState.grid.map((row, rIdx) => 
+                  row.map((cell, cIdx) => {
+                    const piece = blockState.pieces.find(p => p.id === cell.value);
+                    return `
+                      <div
+                        data-block-cell="${rIdx}-${cIdx}"
+                        class="w-full h-full rounded-[2px] transition-all duration-200 ${
+                          cell.isBlocker ? 'bg-ink/80 pattern-diagonal-stripes' : ''
+                        } ${
+                          !cell.value && !cell.isBlocker ? 'bg-white hover:bg-white/90 cursor-pointer' : ''
+                        } ${
+                          cell.value && !cell.isBlocker ? 'cursor-pointer hover:brightness-110' : ''
+                        }"
+                        style="${piece ? `background-color: ${piece.color}; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.1);` : ''}"
+                      ></div>
+                    `;
+                  }).join('')
+                ).join('')}
+              </div>
+            </div>
+
+            <div class="flex-1">
+              <div class="grid grid-cols-3 gap-4">
+                ${blockState.pieces.map((piece) => `
+                  <button
+                    data-piece-id="${piece.id}"
+                    class="p-2 rounded-sm border transition-all h-24 flex items-center justify-center ${
+                      piece.placed ? 'opacity-20 border-transparent cursor-default' : 'hover:border-accent cursor-pointer'
+                    } ${
+                      blockState.selectedPieceId === piece.id ? 'border-accent bg-accent/5 ring-1 ring-accent' : 'border-border-subtle'
+                    }"
+                    ${piece.placed ? 'disabled' : ''}
+                  >
+                    <div style="display: grid; grid-template-columns: repeat(${piece.shape[0].length}, 10px); gap: 2px;">
+                      ${piece.shape.map(row => 
+                        row.map(val => `
+                          <div style="width: 10px; height: 10px; background-color: ${val ? piece.color : 'transparent'}; opacity: ${val ? 1 : 0};"></div>
+                        `).join('')
+                      ).join('')}
+                    </div>
+                  </button>
+                `).join('')}
+              </div>
+              <p class="text-xs text-center mt-4 text-ink-light font-sans italic">
+                Tap a piece to select. Tap again to rotate.<br/>
+                Click on grid to place. Click placed piece to remove.
+              </p>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderInfoModal() {
+      if (!showInfoModal) return '';
+
+      return `
+        <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+          <div class="bg-paper w-full max-w-md rounded-sm shadow-elevated border border-border-subtle flex flex-col max-h-[90vh]">
+            <div class="p-6 border-b border-border-subtle flex justify-between items-center bg-white">
+              <h2 class="font-serif text-2xl font-bold text-ink">How to Play</h2>
+              <button 
+                id="closeInfo"
+                class="text-ink-light hover:text-ink transition-colors text-2xl leading-none"
+              >
+                &times;
+              </button>
+            </div>
+            <div class="p-6 overflow-y-auto">
+              <div class="space-y-8 font-sans text-ink">
+                <section>
+                  <h3 class="font-serif text-xl font-bold mb-2 text-accent">The Fifteen & Quick Blitz</h3>
+                  <p class="text-sm mb-3">
+                    Slide tiles into the empty space to arrange them in numerical order, from top-left to bottom-right.
+                  </p>
+                  <ul class="list-disc pl-5 text-sm space-y-1 mb-4 text-ink-light">
+                    <li><strong>The Fifteen:</strong> A 4x4 grid. Solvability requires foresight and efficiency.</li>
+                    <li><strong>Quick Blitz:</strong> A 3x3 grid designed for speed.</li>
+                  </ul>
+                  
+                  <div class="bg-paper p-4 rounded-sm border border-border-subtle">
+                    <h4 class="text-xs font-bold uppercase tracking-widest mb-3 border-b border-border-subtle pb-2">Daily 15 Rankings</h4>
+                    <div class="space-y-3">
+                      ${DAILY_15_RANKINGS.map(rank => `
+                        <div class="flex justify-between items-baseline text-sm">
+                          <span class="font-bold text-ink">${rank.title}</span>
+                          <span class="text-ink-light font-mono text-xs">≤ ${rank.maxMoves} moves</span>
+                        </div>
+                      `).join('')}
+                    </div>
+                  </div>
+                </section>
+
+                <section class="border-t border-border-subtle pt-6">
+                  <h3 class="font-serif text-xl font-bold mb-2 text-accent">Block Logic</h3>
+                  <p class="text-sm mb-3">
+                    Fit all the colored pieces into the grid without overlapping the grey blocker squares.
+                  </p>
+                  <ul class="list-disc pl-5 text-sm space-y-1 text-ink-light">
+                    <li>Tap a piece in the tray to select it.</li>
+                    <li>Tap the selected piece again (in the tray) to rotate it.</li>
+                    <li>Tap any valid spot on the grid to place the piece.</li>
+                    <li>Tap a placed piece on the grid to remove it.</li>
+                  </ul>
+                </section>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderWinModal() {
+      if (!showWinModal) return '';
+
+      if (currentMode === 'BLOCK_LOGIC') {
+        return `
+          <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+            <div class="bg-paper w-full max-w-md rounded-sm shadow-elevated border border-border-subtle">
+              <div class="p-6 border-b border-border-subtle flex justify-between items-center bg-white">
+                <h2 class="font-serif text-2xl font-bold text-ink">Logic Solved</h2>
+                <button id="closeWin" class="text-ink-light hover:text-ink transition-colors text-2xl leading-none">&times;</button>
+              </div>
+              <div class="p-6">
+                <div class="text-center py-4">
+                  <p class="font-serif text-2xl mb-4 text-ink">Excellent.</p>
+                  <p class="text-ink-light mb-6">You have successfully fit all components.</p>
+                  <button
+                    id="closeWinBtn"
+                    class="bg-accent text-white px-6 py-2 rounded-sm hover:bg-accent-hover transition-colors"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      const mode = currentMode === 'DAILY_15' ? 'DAILY' : 'BLITZ';
+      const ranking = getRanking(fifteenState.moves);
+      const timeElapsed = (fifteenState.endTime && fifteenState.startTime) 
+        ? fifteenState.endTime - fifteenState.startTime 
+        : 0;
+
+      return `
+        <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+          <div class="bg-paper w-full max-w-md rounded-sm shadow-elevated border border-border-subtle">
+            <div class="p-6 border-b border-border-subtle flex justify-between items-center bg-white">
+              <h2 class="font-serif text-2xl font-bold text-ink">${mode === 'DAILY' ? 'Puzzle Solved' : 'Blitz Complete'}</h2>
+              <button id="closeWin" class="text-ink-light hover:text-ink transition-colors text-2xl leading-none">&times;</button>
+            </div>
+            <div class="p-6">
+              <div class="text-center">
+                <div class="mb-6">
+                  <p class="font-sans text-sm text-ink-light uppercase tracking-widest mb-2">Performance</p>
+                  <div class="font-serif text-4xl font-bold text-accent mb-1">${ranking.title}</div>
+                  <p class="font-sans text-ink-light italic">${ranking.description}</p>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4 border-t border-b border-border-subtle py-4 mb-6">
+                  <div>
+                    <div class="text-xs uppercase text-ink-light tracking-wider">Moves</div>
+                    <div class="text-xl font-bold text-ink">${fifteenState.moves}</div>
+                  </div>
+                  <div>
+                    <div class="text-xs uppercase text-ink-light tracking-wider">Time</div>
+                    <div class="text-xl font-bold text-ink">${formatTime(timeElapsed)}</div>
+                  </div>
+                </div>
+
+                <button
+                  id="closeWinBtn"
+                  class="w-full bg-accent hover:bg-accent-hover text-white font-sans font-medium py-3 px-4 rounded-sm transition-colors"
+                >
+                  Review Board
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderFooter() {
+      return `
+        <footer class="w-full py-6 border-t border-border-subtle mt-auto">
+          <div class="max-w-4xl mx-auto px-4 flex justify-between items-center text-xs font-sans text-ink-light">
+            <div>&copy; 2025 Daily15.xyz</div>
+            <div class="flex space-x-4">
+              <button id="privacyBtn" class="hover:text-ink hover:underline">Privacy</button>
+              <button id="aboutBtn" class="hover:text-ink hover:underline">About</button>
+            </div>
+          </div>
+        </footer>
+      `;
+    }
+
+    function attachEventListeners() {
+      // Header navigation
+      const infoBtn = document.getElementById('infoBtn');
+      if (infoBtn) infoBtn.onclick = () => { showInfoModal = true; render(); };
+
+      const navDaily = document.getElementById('navDaily');
+      if (navDaily) navDaily.onclick = () => { 
+        currentMode = 'DAILY_15'; 
+        initFifteenPuzzle('DAILY'); 
+      };
+
+      const navBlitz = document.getElementById('navBlitz');
+      if (navBlitz) navBlitz.onclick = () => { 
+        currentMode = 'QUICK_BLITZ'; 
+        initFifteenPuzzle('BLITZ'); 
+      };
+
+      const navBlock = document.getElementById('navBlock');
+      if (navBlock) navBlock.onclick = () => { 
+        currentMode = 'BLOCK_LOGIC'; 
+        initBlockLogic(); 
+      };
+
+      // Fifteen Puzzle tiles
+      document.querySelectorAll('[data-tile-index]').forEach(tile => {
+        tile.onclick = () => {
+          const index = parseInt(tile.getAttribute('data-tile-index'));
+          handleFifteenTileClick(index);
+        };
+      });
+
+      // Reset buttons
+      const resetBlitz = document.getElementById('resetBlitz');
+      if (resetBlitz) resetBlitz.onclick = () => initFifteenPuzzle('BLITZ');
+
+      const resetBlock = document.getElementById('resetBlock');
+      if (resetBlock) resetBlock.onclick = () => initBlockLogic();
+
+      // Block Logic
+      document.querySelectorAll('[data-piece-id]').forEach(btn => {
+        btn.onclick = () => {
+          const id = btn.getAttribute('data-piece-id');
+          handleBlockPieceSelect(id);
+        };
+      });
+
+      document.querySelectorAll('[data-block-cell]').forEach(cell => {
+        cell.onclick = () => {
+          const [row, col] = cell.getAttribute('data-block-cell').split('-').map(Number);
+          handleBlockGridClick(row, col);
+        };
+      });
+
+      // Modals
+      const closeInfo = document.getElementById('closeInfo');
+      if (closeInfo) closeInfo.onclick = () => { showInfoModal = false; render(); };
+
+      const closeWin = document.getElementById('closeWin');
+      if (closeWin) closeWin.onclick = () => { showWinModal = false; render(); };
+
+      const closeWinBtn = document.getElementById('closeWinBtn');
+      if (closeWinBtn) closeWinBtn.onclick = () => { showWinModal = false; render(); };
+
+      // Footer
+      const privacyBtn = document.getElementById('privacyBtn');
+      if (privacyBtn) privacyBtn.onclick = () => alert("Privacy Policy: We store progress locally on your device.");
+
+      const aboutBtn = document.getElementById('aboutBtn');
+      if (aboutBtn) aboutBtn.onclick = () => alert("About: Designed to stimulate intellectual growth.");
+    }
+
+    // Initialize
+    initFifteenPuzzle('DAILY');
+  </script>
 </body>
 </html>
